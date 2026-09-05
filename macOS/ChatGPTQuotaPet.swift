@@ -412,7 +412,7 @@ final class QuotaModel: ObservableObject {
     private let refreshSeconds: TimeInterval
     private var timer: Timer?
 
-    init(refreshSeconds: TimeInterval = 5) {
+    init(refreshSeconds: TimeInterval = 1) {
         self.refreshSeconds = refreshSeconds
         codexHome = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex", isDirectory: true)
         client.onSnapshot = { [weak self] snapshot in
@@ -450,13 +450,12 @@ final class QuotaModel: ObservableObject {
     private func updateFooter(_ value: QuotaSnapshot) {
         let ageMinutes = max(0, Date().timeIntervalSince(value.sampledAt) / 60)
         let formatter = DateFormatter()
-        formatter.dateFormat = ageMinutes >= 10 ? "MM-dd HH:mm" : "HH:mm:ss"
+        formatter.dateFormat = ageMinutes >= 10 ? "MM-dd HH:mm" : "HH:mm"
         let source = value.sourceName == "app-server" ? "实时" : "快照"
         let stale = ageMinutes >= 10 ? " · 可能过期" : ""
-        let plan = value.planType.map { " · \($0)" } ?? ""
         let shortError = QuotaFormatter.shortError(connectionError)
         let error = value.sourceName == "app-server" || shortError.isEmpty ? "" : " · \(shortError)"
-        footer = "\(source) \(formatter.string(from: value.sampledAt))\(plan)\(stale)\(error) · 每 \(Int(refreshSeconds)) 秒检查"
+        footer = "\(source) \(formatter.string(from: value.sampledAt))\(stale)\(error)"
     }
 }
 
@@ -507,6 +506,15 @@ struct QuotaView: View {
     let refresh: () -> Void
     let dismiss: () -> Void
 
+    private var planSubtitle: String {
+        let plan = (model.snapshot ?? model.fallbackSnapshot)?.planType?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let plan, !plan.isEmpty {
+            return "Codex · (\(plan))"
+        }
+        return "Codex · —"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 7) {
@@ -516,7 +524,7 @@ struct QuotaView: View {
                 Text("ChatGPT 额度")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(Color(red: 0.06, green: 0.09, blue: 0.16))
-                Text("Codex · 实时额度")
+                Text(planSubtitle)
                     .font(.system(size: 11))
                     .foregroundStyle(Color(red: 0.28, green: 0.34, blue: 0.42))
                 Spacer()
