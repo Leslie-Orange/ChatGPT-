@@ -692,10 +692,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.length = 82
 
         let show = NSMenuItem(title: "显示额度", action: #selector(showPopover), keyEquivalent: "")
-        let hide = NSMenuItem(title: "关闭弹窗", action: #selector(closePopover), keyEquivalent: "")
         let refresh = NSMenuItem(title: "立即刷新", action: #selector(refreshQuota), keyEquivalent: "")
         let quit = NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "")
-        [show, hide, refresh, NSMenuItem.separator(), quit].forEach { item in
+        [show, refresh, NSMenuItem.separator(), quit].forEach { item in
             item.target = self
             statusMenu.addItem(item)
         }
