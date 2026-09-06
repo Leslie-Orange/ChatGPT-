@@ -459,45 +459,178 @@ final class QuotaModel: ObservableObject {
     }
 }
 
-struct QuotaCard: View {
+private struct LiquidGlassBackground: View {
+    var body: some View {
+        ZStack {
+            Color(nsColor: .windowBackgroundColor).opacity(0.38)
+
+            Circle()
+                .fill(Color(red: 0.42, green: 0.70, blue: 1.0).opacity(0.29))
+                .frame(width: 240, height: 240)
+                .blur(radius: 34)
+                .offset(x: -145, y: -120)
+
+            Circle()
+                .fill(Color(red: 0.65, green: 0.52, blue: 1.0).opacity(0.22))
+                .frame(width: 220, height: 220)
+                .blur(radius: 36)
+                .offset(x: 158, y: 122)
+
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(.ultraThinMaterial)
+
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.15),
+                            Color.white.opacity(0.025),
+                            Color.blue.opacity(0.02)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.68),
+                            Color.white.opacity(0.10),
+                            Color.white.opacity(0.42)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.9
+                )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .shadow(color: Color.black.opacity(0.12), radius: 28, x: 0, y: 14)
+    }
+}
+
+private struct GlassIconButton: View {
+    let systemName: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.primary.opacity(0.72))
+                .frame(width: 30, height: 30)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .background(Circle().fill(.ultraThinMaterial))
+        .overlay(Circle().stroke(Color.white.opacity(0.42), lineWidth: 0.8))
+        .shadow(color: Color.black.opacity(0.05), radius: 5, y: 2)
+        .accessibilityLabel(accessibilityLabel)
+        .help(accessibilityLabel)
+    }
+}
+
+private struct QuotaRing: View {
+    let label: String
+    let progress: CGFloat
+    let tint: Color
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.primary.opacity(0.10), lineWidth: 5)
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(
+                    AngularGradient(
+                        colors: [tint.opacity(0.45), tint, tint.opacity(0.72)],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 5, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .shadow(color: tint.opacity(0.36), radius: 4)
+            Text(label)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.primary.opacity(0.72))
+        }
+        .frame(width: 52, height: 52)
+        .animation(.easeOut(duration: 0.35), value: progress)
+    }
+}
+
+private struct QuotaCard: View {
     let title: String
+    let badge: String
     let window: QuotaWindow
 
-    private var barColor: Color {
-        guard let remaining = window.remaining else { return .gray.opacity(0.35) }
-        if remaining <= 10 { return Color(red: 0.94, green: 0.27, blue: 0.27) }
-        if remaining <= 30 { return Color(red: 0.96, green: 0.62, blue: 0.04) }
-        return Color(red: 0.06, green: 0.73, blue: 0.50)
+    private var tint: Color {
+        guard let remaining = window.remaining else { return Color.gray.opacity(0.55) }
+        if remaining <= 10 { return Color(red: 0.94, green: 0.29, blue: 0.30) }
+        if remaining <= 30 { return Color(red: 0.96, green: 0.60, blue: 0.06) }
+        return Color(red: 0.08, green: 0.71, blue: 0.54)
+    }
+
+    private var progress: CGFloat {
+        CGFloat(min(100, max(0, window.remaining ?? 0)) / 100)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack {
+        HStack(spacing: 13) {
+            QuotaRing(label: badge, progress: progress, tint: tint)
+
+            VStack(alignment: .leading, spacing: 5) {
                 Text(QuotaFormatter.caption(minutes: window.windowMinutes, fallback: title))
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color(red: 0.20, green: 0.25, blue: 0.33))
-                Spacer()
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(QuotaFormatter.reset(window.resetAt))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 6)
+
+            VStack(alignment: .trailing, spacing: 3) {
                 Text(QuotaFormatter.percent(window.remaining))
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(barColor)
+                    .font(.system(size: 23, weight: .bold, design: .rounded))
+                    .foregroundStyle(tint)
+                Text("当前可用")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color(red: 0.89, green: 0.91, blue: 0.94))
-                    Capsule()
-                        .fill(barColor)
-                        .frame(width: geometry.size.width * CGFloat(min(100, max(0, window.remaining ?? 0)) / 100))
-                }
-            }
-            .frame(height: 8)
-            Text(QuotaFormatter.reset(window.resetAt))
-                .font(.system(size: 11))
-                .foregroundStyle(Color(red: 0.39, green: 0.45, blue: 0.54))
         }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 9)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.10), Color.white.opacity(0.01)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.54), Color.white.opacity(0.12)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.8
+                )
+        )
+        .shadow(color: Color.black.opacity(0.05), radius: 12, x: 0, y: 5)
     }
 }
 
@@ -506,58 +639,112 @@ struct QuotaView: View {
     let refresh: () -> Void
     let dismiss: () -> Void
 
-    private var planSubtitle: String {
-        let plan = (model.snapshot ?? model.fallbackSnapshot)?.planType?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    private let placeholder = QuotaWindow(remaining: nil, used: nil, resetAt: nil, windowMinutes: nil)
+
+    private var currentSnapshot: QuotaSnapshot? {
+        model.snapshot ?? model.fallbackSnapshot
+    }
+
+    private var planTitle: String {
+        let plan = currentSnapshot?.planType?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let plan, !plan.isEmpty {
-            return "Codex · (\(plan))"
+            return "\(plan.capitalized) 额度"
         }
-        return "Codex · —"
+        return "订阅额度"
+    }
+
+    private var statusTint: Color {
+        currentSnapshot?.sourceName == "app-server"
+            ? Color(red: 0.08, green: 0.71, blue: 0.54)
+            : Color(red: 0.96, green: 0.60, blue: 0.06)
+    }
+
+    private var statusBadge: String {
+        guard let currentSnapshot else { return "WAIT" }
+        return currentSnapshot.sourceName == "app-server" ? "LIVE" : "SNAPSHOT"
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(Color(red: 0.06, green: 0.73, blue: 0.50))
-                    .frame(width: 10, height: 10)
-                Text("ChatGPT 额度")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(Color(red: 0.06, green: 0.09, blue: 0.16))
-                Text(planSubtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color(red: 0.28, green: 0.34, blue: 0.42))
-                Spacer()
-                Button("↻", action: refresh)
-                    .buttonStyle(.plain)
-                    .font(.system(size: 18))
-                    .foregroundStyle(Color(red: 0.15, green: 0.39, blue: 0.92))
-                Button("×", action: dismiss)
-                    .buttonStyle(.plain)
-                    .font(.system(size: 18))
-                    .foregroundStyle(Color.gray)
-            }
-            .padding(.horizontal, 13)
-            .frame(height: 43)
-            .background(Color(red: 0.94, green: 0.97, blue: 1.0))
+        ZStack {
+            LiquidGlassBackground()
 
-            VStack(spacing: 8) {
-                QuotaCard(title: "5 小时窗口剩余", window: model.snapshot?.primary ?? model.fallbackSnapshot?.primary ?? QuotaWindow(remaining: nil, used: nil, resetAt: nil, windowMinutes: nil))
-                QuotaCard(title: "7 天窗口剩余", window: model.snapshot?.secondary ?? model.fallbackSnapshot?.secondary ?? QuotaWindow(remaining: nil, used: nil, resetAt: nil, windowMinutes: nil))
-            }
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
+            VStack(spacing: 0) {
+                HStack(spacing: 11) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.25, green: 0.57, blue: 1.0),
+                                        Color(red: 0.43, green: 0.32, blue: 0.92)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                        Image(systemName: "gauge.medium")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .frame(width: 38, height: 38)
+                    .shadow(color: Color.blue.opacity(0.28), radius: 9, y: 4)
 
-            Text(model.footer)
-                .font(.system(size: 10))
-                .foregroundStyle(Color(red: 0.39, green: 0.45, blue: 0.54))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 13)
-                .padding(.top, 7)
-                .padding(.bottom, 8)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(planTitle)
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.primary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    HStack(spacing: 7) {
+                        GlassIconButton(systemName: "arrow.clockwise", accessibilityLabel: "刷新额度", action: refresh)
+                        GlassIconButton(systemName: "xmark", accessibilityLabel: "关闭详情", action: dismiss)
+                    }
+                }
+                .padding(.horizontal, 17)
+                .padding(.top, 16)
+                .padding(.bottom, 13)
+
+                VStack(spacing: 10) {
+                    QuotaCard(
+                        title: "5 小时窗口剩余",
+                        badge: "5h",
+                        window: currentSnapshot?.primary ?? placeholder
+                    )
+                    QuotaCard(
+                        title: "7 天窗口剩余",
+                        badge: "7d",
+                        window: currentSnapshot?.secondary ?? placeholder
+                    )
+                }
+                .padding(.horizontal, 14)
+
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(statusTint)
+                        .frame(width: 7, height: 7)
+                        .shadow(color: statusTint.opacity(0.55), radius: 4)
+                    Text(model.footer)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 5)
+                    Text(statusBadge)
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .tracking(0.8)
+                        .foregroundStyle(statusTint)
+                }
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(.ultraThinMaterial))
+                .overlay(Capsule().stroke(Color.white.opacity(0.28), lineWidth: 0.7))
+                .padding(.horizontal, 17)
+                .padding(.top, 12)
+                .padding(.bottom, 14)
+            }
         }
-        .frame(width: 340, height: 228)
-        .background(Color(red: 0.97, green: 0.98, blue: 0.99))
+        .frame(width: 386, height: 292)
     }
 }
 
@@ -565,6 +752,10 @@ final class QuotaStatusView: NSView {
     var onLeftClick: (() -> Void)?
     var onRightClick: (() -> Void)?
 
+    private let iconLeading: CGFloat = 2
+    private let labelLeading: CGFloat = 23
+    private let labelTrailing: CGFloat = 2
+    private let minimumWidth: CGFloat = 70
     private let iconView = NSImageView()
     private let primaryLabel = NSTextField(labelWithString: "5h —")
     private let secondaryLabel = NSTextField(labelWithString: "7d —")
@@ -601,9 +792,17 @@ final class QuotaStatusView: NSView {
 
     override func layout() {
         super.layout()
-        iconView.frame = NSRect(x: 4, y: 3, width: 18, height: 18)
-        primaryLabel.frame = NSRect(x: 26, y: 1, width: max(20, bounds.width - 29), height: 10)
-        secondaryLabel.frame = NSRect(x: 26, y: 11, width: max(20, bounds.width - 29), height: 10)
+        iconView.frame = NSRect(x: iconLeading, y: 3, width: 18, height: 18)
+        let labelWidth = max(20, bounds.width - labelLeading - labelTrailing)
+        primaryLabel.frame = NSRect(x: labelLeading, y: 1, width: labelWidth, height: 10)
+        secondaryLabel.frame = NSRect(x: labelLeading, y: 11, width: labelWidth, height: 10)
+    }
+
+    var preferredWidth: CGFloat {
+        let font = primaryLabel.font ?? NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        let primaryWidth = (primaryLabel.stringValue as NSString).size(withAttributes: [.font: font]).width
+        let secondaryWidth = (secondaryLabel.stringValue as NSString).size(withAttributes: [.font: font]).width
+        return max(minimumWidth, ceil(labelLeading + max(primaryWidth, secondaryWidth) + labelTrailing + 1))
     }
 
     func update(primary: Double?, secondary: Double?, sourceName: String?) {
@@ -646,6 +845,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusView: QuotaStatusView!
     private let statusMenu = NSMenu()
     private var cancellables = Set<AnyCancellable>()
+    private var localClickMonitor: Any?
+    private var globalClickMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -665,9 +866,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return event
         }
+        installPopoverDismissMonitors()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        removePopoverDismissMonitors()
         model.stop()
     }
 
@@ -675,21 +878,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
-        popover.contentSize = NSSize(width: 340, height: 228)
-        popover.contentViewController = NSHostingController(rootView: QuotaView(
+        popover.contentSize = NSSize(width: 386, height: 292)
+
+        let hostingController = NSHostingController(rootView: QuotaView(
             model: model,
             refresh: { [weak self] in self?.model.refresh() },
             dismiss: { [weak self] in self?.closePopover() }
         ))
+        hostingController.view.wantsLayer = true
+        hostingController.view.layer?.backgroundColor = NSColor.clear.cgColor
+        hostingController.view.layer?.cornerRadius = 28
+        hostingController.view.layer?.masksToBounds = true
+        popover.contentViewController = hostingController
     }
 
     private func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusView = QuotaStatusView(frame: NSRect(x: 0, y: 0, width: 82, height: 22))
+        statusView = QuotaStatusView(frame: NSRect(x: 0, y: 0, width: 70, height: 22))
         statusView.onLeftClick = { [weak self] in self?.togglePopover() }
         statusView.onRightClick = { [weak self] in self?.showStatusMenu() }
         statusItem.view = statusView
-        statusItem.length = 82
+        statusItem.length = 70
 
         let show = NSMenuItem(title: "显示额度", action: #selector(showPopover), keyEquivalent: "")
         let refresh = NSMenuItem(title: "立即刷新", action: #selector(refreshQuota), keyEquivalent: "")
@@ -701,7 +910,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showStatusMenu() {
+        closePopover()
         statusMenu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
+    private func installPopoverDismissMonitors() {
+        let mouseDownMask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseDownMask) { [weak self] event in
+            self?.dismissPopoverForLocalClick()
+            return event
+        }
+
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: mouseDownMask) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.dismissPopoverForGlobalClick()
+            }
+        }
+    }
+
+    private func removePopoverDismissMonitors() {
+        if let localClickMonitor {
+            NSEvent.removeMonitor(localClickMonitor)
+            self.localClickMonitor = nil
+        }
+        if let globalClickMonitor {
+            NSEvent.removeMonitor(globalClickMonitor)
+            self.globalClickMonitor = nil
+        }
+    }
+
+    private func dismissPopoverForLocalClick() {
+        guard popover.isShown else { return }
+        let clickLocation = NSEvent.mouseLocation
+
+        if let popoverWindow = popover.contentViewController?.view.window,
+           popoverWindow.frame.contains(clickLocation) {
+            return
+        }
+
+        if isClickInStatusItem(clickLocation) {
+            return
+        }
+
+        closePopover()
+    }
+
+    private func dismissPopoverForGlobalClick() {
+        guard popover.isShown else { return }
+        if isClickInStatusItem(NSEvent.mouseLocation) { return }
+        closePopover()
+    }
+
+    private func isClickInStatusItem(_ clickLocation: NSPoint) -> Bool {
+        guard let statusWindow = statusView.window else { return false }
+        let statusRect = statusView.convert(statusView.bounds, to: nil)
+        return statusWindow.convertToScreen(statusRect).contains(clickLocation)
     }
 
     private func updateStatusItem() {
@@ -711,6 +975,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusView.update(primary: value.primary.remaining, secondary: value.secondary.remaining, sourceName: value.sourceName)
         } else {
             statusView.update(primary: nil, secondary: nil, sourceName: nil)
+        }
+
+        let width = statusView.preferredWidth
+        if statusItem.length != width {
+            statusView.setFrameSize(NSSize(width: width, height: statusView.frame.height))
+            statusItem.length = width
+            statusView.needsLayout = true
         }
     }
 
