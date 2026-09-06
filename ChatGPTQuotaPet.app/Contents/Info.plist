@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>ChatGPT 额度桌宠</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleExecutable</key>
 	<string>ChatGPTQuotaPet</string>
 	<key>CFBundleIdentifier</key>

@@ -389,6 +389,28 @@ enum QuotaFormatter {
         return "约 \(hours) 小时 \(rest) 分钟后重置"
     }
 
+    static func consumptionRate(
+        window: QuotaWindow,
+        fallbackWindowMinutes: Double,
+        displayPeriodMinutes: Double,
+        unit: String
+    ) -> String {
+        guard let resetAt = window.resetAt, let usedValue = window.used else { return "等待数据" }
+
+        let totalMinutes = max(1, window.windowMinutes ?? fallbackWindowMinutes)
+        let remainingMinutes = min(
+            totalMinutes,
+            max(0, (resetAt - Date().timeIntervalSince1970) / 60)
+        )
+        let elapsedMinutes = totalMinutes - remainingMinutes
+        guard elapsedMinutes >= 1 else { return "等待数据" }
+
+        let used = min(100, max(0, usedValue))
+        let rate = used / elapsedMinutes * displayPeriodMinutes
+        guard rate.isFinite else { return "等待数据" }
+        return String(format: "%.1f%%/%@", rate, unit)
+    }
+
     static func shortError(_ error: String) -> String {
         if error.isEmpty { return "" }
         if error.range(of: "codex", options: [.caseInsensitive]) != nil &&
@@ -567,6 +589,9 @@ private struct QuotaCard: View {
     let title: String
     let badge: String
     let window: QuotaWindow
+    let fallbackWindowMinutes: Double
+    let ratePeriodMinutes: Double
+    let rateUnit: String
 
     private var tint: Color {
         guard let remaining = window.remaining else { return Color.gray.opacity(0.55) }
@@ -577,6 +602,15 @@ private struct QuotaCard: View {
 
     private var progress: CGFloat {
         CGFloat(min(100, max(0, window.remaining ?? 0)) / 100)
+    }
+
+    private var consumptionRate: String {
+        QuotaFormatter.consumptionRate(
+            window: window,
+            fallbackWindowMinutes: fallbackWindowMinutes,
+            displayPeriodMinutes: ratePeriodMinutes,
+            unit: rateUnit
+        )
     }
 
     var body: some View {
@@ -600,9 +634,11 @@ private struct QuotaCard: View {
                 Text(QuotaFormatter.percent(window.remaining))
                     .font(.system(size: 23, weight: .bold, design: .rounded))
                     .foregroundStyle(tint)
-                Text("当前可用")
-                    .font(.system(size: 10, weight: .medium))
+                Text(consumptionRate)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
+                    .help("按当前窗口已用额度与已过时长折算")
             }
         }
         .padding(.horizontal, 14)
@@ -710,12 +746,18 @@ struct QuotaView: View {
                     QuotaCard(
                         title: "5 小时窗口剩余",
                         badge: "5h",
-                        window: currentSnapshot?.primary ?? placeholder
+                        window: currentSnapshot?.primary ?? placeholder,
+                        fallbackWindowMinutes: 5 * 60,
+                        ratePeriodMinutes: 30,
+                        rateUnit: "30min"
                     )
                     QuotaCard(
                         title: "7 天窗口剩余",
                         badge: "7d",
-                        window: currentSnapshot?.secondary ?? placeholder
+                        window: currentSnapshot?.secondary ?? placeholder,
+                        fallbackWindowMinutes: 7 * 24 * 60,
+                        ratePeriodMinutes: 24 * 60,
+                        rateUnit: "天"
                     )
                 }
                 .padding(.horizontal, 14)
@@ -754,8 +796,9 @@ final class QuotaStatusView: NSView {
 
     private let iconLeading: CGFloat = 2
     private let labelLeading: CGFloat = 23
-    private let labelTrailing: CGFloat = 2
-    private let minimumWidth: CGFloat = 70
+    private let labelTrailing: CGFloat = 6
+    private let labelSafetyPadding: CGFloat = 8
+    private let minimumWidth: CGFloat = 84
     private let iconView = NSImageView()
     private let primaryLabel = NSTextField(labelWithString: "5h —")
     private let secondaryLabel = NSTextField(labelWithString: "7d —")
@@ -800,9 +843,16 @@ final class QuotaStatusView: NSView {
 
     var preferredWidth: CGFloat {
         let font = primaryLabel.font ?? NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
-        let primaryWidth = (primaryLabel.stringValue as NSString).size(withAttributes: [.font: font]).width
-        let secondaryWidth = (secondaryLabel.stringValue as NSString).size(withAttributes: [.font: font]).width
-        return max(minimumWidth, ceil(labelLeading + max(primaryWidth, secondaryWidth) + labelTrailing + 1))
+        let labelWidths = [
+            primaryLabel.stringValue,
+            secondaryLabel.stringValue,
+            "5h 100%",
+            "7d 100%"
+        ].map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+        return max(
+            minimumWidth,
+            ceil(labelLeading + (labelWidths.max() ?? 0) + labelTrailing + labelSafetyPadding)
+        )
     }
 
     func update(primary: Double?, secondary: Double?, sourceName: String?) {
@@ -894,11 +944,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusView = QuotaStatusView(frame: NSRect(x: 0, y: 0, width: 70, height: 22))
+        let initialStatusView = QuotaStatusView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        let initialWidth = initialStatusView.preferredWidth
+        initialStatusView.setFrameSize(NSSize(width: initialWidth, height: 22))
+        statusView = initialStatusView
         statusView.onLeftClick = { [weak self] in self?.togglePopover() }
         statusView.onRightClick = { [weak self] in self?.showStatusMenu() }
         statusItem.view = statusView
-        statusItem.length = 70
+        statusItem.length = initialWidth
 
         let show = NSMenuItem(title: "显示额度", action: #selector(showPopover), keyEquivalent: "")
         let refresh = NSMenuItem(title: "立即刷新", action: #selector(refreshQuota), keyEquivalent: "")
