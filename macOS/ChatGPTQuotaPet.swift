@@ -498,10 +498,10 @@ private struct LiquidGlassBackground: View {
                 .blur(radius: 36)
                 .offset(x: 158, y: 122)
 
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
+            Rectangle()
                 .fill(.ultraThinMaterial)
 
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
+            Rectangle()
                 .fill(
                     LinearGradient(
                         colors: [
@@ -514,23 +514,9 @@ private struct LiquidGlassBackground: View {
                     )
                 )
         }
-        .overlay(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.68),
-                            Color.white.opacity(0.10),
-                            Color.white.opacity(0.42)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 0.9
-                )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .shadow(color: Color.black.opacity(0.12), radius: 28, x: 0, y: 14)
+        .clipped()
+        // NSPopover owns the outer contour, border, and shadow. Fill its
+        // content bounds so a second rounded mask cannot expose its backing.
     }
 }
 
@@ -566,7 +552,8 @@ private struct QuotaRing: View {
             Circle()
                 .stroke(Color.primary.opacity(0.10), lineWidth: 5)
             Circle()
-                .trim(from: 0, to: progress)
+                // Advance the consumed edge clockwise from 12 o’clock.
+                .trim(from: 1 - progress, to: 1)
                 .stroke(
                     AngularGradient(
                         colors: [tint.opacity(0.45), tint, tint.opacity(0.72)],
@@ -937,8 +924,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ))
         hostingController.view.wantsLayer = true
         hostingController.view.layer?.backgroundColor = NSColor.clear.cgColor
-        hostingController.view.layer?.cornerRadius = 28
-        hostingController.view.layer?.masksToBounds = true
         popover.contentViewController = hostingController
     }
 
