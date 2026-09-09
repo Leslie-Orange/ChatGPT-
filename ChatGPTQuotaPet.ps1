@@ -18,7 +18,13 @@ if ([string]::IsNullOrWhiteSpace($userProfileRoot)) {
 if ([string]::IsNullOrWhiteSpace($userProfileRoot)) {
     $userProfileRoot = (Get-Location).Path
 }
-$script:CodexHome = Join-Path $userProfileRoot '.codex'
+$script:UserProfileRoot = $userProfileRoot
+$codexHomeOverride = $env:CODEX_HOME
+$script:CodexHome = if ([string]::IsNullOrWhiteSpace($codexHomeOverride)) {
+    Join-Path $userProfileRoot '.codex'
+} else {
+    $codexHomeOverride
+}
 $script:LiveSnapshot = $null
 $script:FallbackSnapshot = $null
 $script:ConnectionError = ''
@@ -27,6 +33,7 @@ $script:PopupForm = $null
 $script:TrayIcon = $null
 $script:TrayIconImage = $null
 $script:TrayMenu = $null
+$script:TrayAnchorPoint = $null
 $script:RefreshTimer = $null
 $script:AllowFormClose = $false
 $script:SelfTestExitCode = 0
@@ -459,7 +466,32 @@ function Get-CodexExecutable {
         $candidates += Join-Path $userProfile '.local\bin\codex.exe'
         $candidates += Join-Path $userProfile '.local\bin\codex.cmd'
     }
-    foreach ($candidate in $candidates) {
+
+    $binRoots = @()
+    if (-not [string]::IsNullOrWhiteSpace($localAppData)) {
+        $binRoots += Join-Path $localAppData 'OpenAI\Codex\bin'
+    }
+    foreach ($binRoot in @($binRoots | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $binRoot -PathType Container)) {
+            continue
+        }
+
+        foreach ($fileName in @('codex.exe', 'codex.cmd')) {
+            $candidates += Join-Path $binRoot $fileName
+        }
+
+        $versionDirectories = @(
+            Get-ChildItem -LiteralPath $binRoot -Directory -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending
+        )
+        foreach ($versionDirectory in $versionDirectories) {
+            foreach ($fileName in @('codex.exe', 'codex.cmd')) {
+                $candidates += Join-Path $versionDirectory.FullName $fileName
+            }
+        }
+    }
+
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
         if (Test-Path -LiteralPath $candidate -PathType Leaf) {
             return (Resolve-Path -LiteralPath $candidate).Path
         }
@@ -568,7 +600,7 @@ public sealed class ChatGPTQuotaPetProcessBridge : IDisposable
         }
     }
 
-    public void Start(string fileName, string arguments)
+    public void Start(string fileName, string arguments, string homeDirectory, string codexHome)
     {
         Stop();
         var startInfo = new ProcessStartInfo
@@ -583,6 +615,14 @@ public sealed class ChatGPTQuotaPetProcessBridge : IDisposable
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
         };
+        if (!String.IsNullOrWhiteSpace(homeDirectory))
+        {
+            startInfo.EnvironmentVariables["HOME"] = homeDirectory;
+        }
+        if (!String.IsNullOrWhiteSpace(codexHome))
+        {
+            startInfo.EnvironmentVariables["CODEX_HOME"] = codexHome;
+        }
         var nextProcess = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         outputHandler = delegate(object sender, DataReceivedEventArgs args)
         {
@@ -670,7 +710,12 @@ function Start-AppServer {
     $startInfo = New-AppServerStartInfo -Executable $executable
 
     try {
-        $state.ProcessBridge.Start($startInfo.FileName, $startInfo.Arguments)
+        $state.ProcessBridge.Start(
+            $startInfo.FileName,
+            $startInfo.Arguments,
+            $script:UserProfileRoot,
+            $script:CodexHome
+        )
     } catch {
         Set-AppServerError -Message ('无法启动本地额度接口：' + $_.Exception.Message)
         Stop-AppServer
@@ -682,6 +727,7 @@ function Start-AppServer {
     $state.PendingReadId = $null
     $state.PendingSince = $null
     $state.Ready = $false
+    $state.LastError = ''
     Send-AppServerMessage -Message ([ordered]@{
             jsonrpc = '2.0'
             id = $state.NextId
@@ -811,7 +857,7 @@ function Process-AppServerQueue {
             }
         } elseif ($item.Kind -eq 'stderr') {
             $message = ([string]$item.Data).Trim()
-            if ($message.Length -gt 0) {
+            if ($message.Length -gt 0 -and [string]::IsNullOrEmpty($script:AppServer.LastError)) {
                 $script:AppServer.LastError = $message
             }
         } elseif ($item.Kind -eq 'exited') {
@@ -833,14 +879,10 @@ function Get-CurrentSnapshot {
 function Get-TrayText {
     $snapshot = Get-CurrentSnapshot
     if ($null -eq $snapshot) {
-        return 'Codex 额度 · 等待数据'
+        return "订阅额度`r`n5h：—`r`n7d：—"
     }
-    $source = if ($snapshot.SourceName -eq 'app-server') { '实时' } else { '快照' }
-    $text = 'Codex 额度 · 5h {0} · 7d {1} · {2}' -f (Format-Percent $snapshot.Primary.Remaining), (Format-Percent $snapshot.Secondary.Remaining), $source
-    if ($text.Length -gt 63) {
-        return $text.Substring(0, 63)
-    }
-    return $text
+    $planTitle = (Get-PlanTitle -Snapshot $snapshot) -replace '\s+', ''
+    return "{0}`r`n5h：{1}`r`n7d：{2}" -f $planTitle, (Format-Percent $snapshot.Primary.Remaining), (Format-Percent $snapshot.Secondary.Remaining)
 }
 
 function Update-Ui {
@@ -908,6 +950,20 @@ function Get-QuotaTint {
     return [Drawing.Color]::FromArgb(255, 20, 181, 138)
 }
 
+function Get-QuotaRingArc {
+    param([AllowNull()][object]$Remaining)
+
+    if ($null -eq $Remaining) {
+        return $null
+    }
+
+    $progress = [Math]::Min(100.0, [Math]::Max(0.0, [double]$Remaining)) / 100.0
+    return [pscustomobject]@{
+        StartAngle = [single](-90.0 - (360.0 * $progress))
+        SweepAngle = [single](360.0 * $progress)
+    }
+}
+
 function Draw-QuotaRing {
     param(
         [Parameter(Mandatory)][Drawing.Graphics]$Graphics,
@@ -921,13 +977,13 @@ function Draw-QuotaRing {
     $Graphics.DrawEllipse($basePen, $Rectangle)
     $basePen.Dispose()
 
-    if ($null -ne $Remaining) {
-        $progress = [Math]::Min(100.0, [Math]::Max(0.0, [double]$Remaining)) / 100.0
-        if ($progress -gt 0) {
-            $progressPen = New-Object Drawing.Pen($Tint, 5)
-            $Graphics.DrawArc($progressPen, $Rectangle, -90, [single](360.0 * $progress))
-            $progressPen.Dispose()
-        }
+    $arc = Get-QuotaRingArc -Remaining $Remaining
+    if ($null -ne $arc -and $arc.SweepAngle -gt 0) {
+        $progressPen = New-Object Drawing.Pen($Tint, 5)
+        # Keep the remaining arc ending at 12 o'clock. As usage grows,
+        # its leading/consumed edge advances clockwise from that point.
+        $Graphics.DrawArc($progressPen, $Rectangle, $arc.StartAngle, $arc.SweepAngle)
+        $progressPen.Dispose()
     }
 
     $labelFont = New-Object Drawing.Font('Microsoft YaHei UI', 10, [Drawing.FontStyle]::Bold)
@@ -935,7 +991,13 @@ function Draw-QuotaRing {
     $format = New-Object Drawing.StringFormat
     $format.Alignment = [Drawing.StringAlignment]::Center
     $format.LineAlignment = [Drawing.StringAlignment]::Center
-    $Graphics.DrawString($Label, $labelFont, $labelBrush, $Rectangle, $format)
+    $labelRect = [Drawing.RectangleF]::new(
+        [single]$Rectangle.X,
+        [single]$Rectangle.Y,
+        [single]$Rectangle.Width,
+        [single]$Rectangle.Height
+    )
+    $Graphics.DrawString($Label, $labelFont, $labelBrush, $labelRect, $format)
     $format.Dispose()
     $labelBrush.Dispose()
     $labelFont.Dispose()
@@ -1081,8 +1143,20 @@ function Draw-Popup {
     $buttonFormat = New-Object Drawing.StringFormat
     $buttonFormat.Alignment = [Drawing.StringAlignment]::Center
     $buttonFormat.LineAlignment = [Drawing.StringAlignment]::Center
-    $Graphics.DrawString('↻', $buttonFont, $buttonTextBrush, $refreshRect, $buttonFormat)
-    $Graphics.DrawString('×', $buttonFont, $buttonTextBrush, $closeRect, $buttonFormat)
+    $refreshTextRect = [Drawing.RectangleF]::new(
+        [single]$refreshRect.X,
+        [single]$refreshRect.Y,
+        [single]$refreshRect.Width,
+        [single]$refreshRect.Height
+    )
+    $closeTextRect = [Drawing.RectangleF]::new(
+        [single]$closeRect.X,
+        [single]$closeRect.Y,
+        [single]$closeRect.Width,
+        [single]$closeRect.Height
+    )
+    $Graphics.DrawString('↻', $buttonFont, $buttonTextBrush, $refreshTextRect, $buttonFormat)
+    $Graphics.DrawString('×', $buttonFont, $buttonTextBrush, $closeTextRect, $buttonFormat)
     $buttonFormat.Dispose()
     $buttonTextBrush.Dispose()
     $buttonFont.Dispose()
@@ -1133,19 +1207,95 @@ function Hide-Popup {
     }
 }
 
+function Update-TrayAnchorPoint {
+    if ($null -eq $script:TrayIcon) {
+        return
+    }
+
+    $point = [Windows.Forms.Cursor]::Position
+    $script:TrayAnchorPoint = [Drawing.Point]::new($point.X, $point.Y)
+}
+
+function Get-TrayAnchorPoint {
+    if ($null -ne $script:TrayAnchorPoint) {
+        return $script:TrayAnchorPoint
+    }
+
+    $point = [Windows.Forms.Cursor]::Position
+    return [Drawing.Point]::new($point.X, $point.Y)
+}
+
+function Get-PopupLocation {
+    param(
+        [Parameter(Mandatory)][Drawing.Point]$AnchorPoint,
+        [Parameter(Mandatory)][Drawing.Size]$PopupSize,
+        [Parameter(Mandatory)][object]$Screen
+    )
+
+    $screenBounds = $Screen.Bounds
+    $workingArea = $Screen.WorkingArea
+    $gap = 8
+
+    # Prefer the side where the taskbar consumes working area. This keeps the
+    # popup adjacent to the tray icon whether the taskbar is on the top,
+    # bottom, left, or right edge of the screen.
+    $edge = 'bottom'
+    if ($workingArea.Top -gt $screenBounds.Top) {
+        $edge = 'top'
+    } elseif ($workingArea.Right -lt $screenBounds.Right) {
+        $edge = 'right'
+    } elseif ($workingArea.Left -gt $screenBounds.Left) {
+        $edge = 'left'
+    } elseif ($workingArea.Bottom -lt $screenBounds.Bottom) {
+        $edge = 'bottom'
+    }
+
+    switch ($edge) {
+        'top' {
+            $x = [int][Math]::Round($AnchorPoint.X - ($PopupSize.Width / 2.0))
+            $y = $AnchorPoint.Y + $gap
+        }
+        'left' {
+            $x = $AnchorPoint.X + $gap
+            $y = [int][Math]::Round($AnchorPoint.Y - ($PopupSize.Height / 2.0))
+        }
+        'right' {
+            $x = $AnchorPoint.X - $PopupSize.Width - $gap
+            $y = [int][Math]::Round($AnchorPoint.Y - ($PopupSize.Height / 2.0))
+        }
+        default {
+            $x = [int][Math]::Round($AnchorPoint.X - ($PopupSize.Width / 2.0))
+            $y = $AnchorPoint.Y - $PopupSize.Height - $gap
+        }
+    }
+
+    $minX = $workingArea.Left + $gap
+    $maxX = $workingArea.Right - $PopupSize.Width - $gap
+    if ($maxX -lt $minX) {
+        $x = $workingArea.Left
+    } else {
+        $x = [Math]::Min($maxX, [Math]::Max($minX, $x))
+    }
+
+    $minY = $workingArea.Top + $gap
+    $maxY = $workingArea.Bottom - $PopupSize.Height - $gap
+    if ($maxY -lt $minY) {
+        $y = $workingArea.Top
+    } else {
+        $y = [Math]::Min($maxY, [Math]::Max($minY, $y))
+    }
+
+    return [Drawing.Point]::new([int]$x, [int]$y)
+}
+
 function Show-Popup {
     if ($null -eq $script:PopupForm -or $script:PopupForm.IsDisposed) {
         return
     }
 
-    $cursor = [Windows.Forms.Cursor]::Position
-    $screen = [Windows.Forms.Screen]::FromPoint($cursor)
-    $area = $screen.WorkingArea
-    $width = $script:PopupForm.Width
-    $height = $script:PopupForm.Height
-    $x = [Math]::Max($area.Left + 8, $area.Right - $width - 12)
-    $y = [Math]::Max($area.Top + 8, $area.Bottom - $height - 12)
-    $script:PopupForm.Location = [Drawing.Point]::new($x, $y)
+    $anchorPoint = Get-TrayAnchorPoint
+    $screen = [Windows.Forms.Screen]::FromPoint($anchorPoint)
+    $script:PopupForm.Location = Get-PopupLocation -AnchorPoint $anchorPoint -PopupSize $script:PopupForm.Size -Screen $screen
     $script:PopupForm.Show()
     $script:PopupForm.Activate()
 }
@@ -1193,6 +1343,26 @@ function New-NotifyIconImage {
     }
 }
 
+function Set-FormDoubleBuffering {
+    param([Parameter(Mandatory)][Windows.Forms.Form]$Form)
+
+    $nonPublicInstance = [Reflection.BindingFlags]::Instance -bor [Reflection.BindingFlags]::NonPublic
+    $doubleBufferedProperty = $Form.GetType().GetProperty('DoubleBuffered', $nonPublicInstance)
+    if ($null -ne $doubleBufferedProperty) {
+        $doubleBufferedProperty.SetValue($Form, $true, $null)
+    }
+
+    $setStyleMethod = $Form.GetType().GetMethod('SetStyle', $nonPublicInstance)
+    $updateStylesMethod = $Form.GetType().GetMethod('UpdateStyles', $nonPublicInstance)
+    if ($null -ne $setStyleMethod -and $null -ne $updateStylesMethod) {
+        $styles = [Windows.Forms.ControlStyles]::UserPaint -bor
+            [Windows.Forms.ControlStyles]::AllPaintingInWmPaint -bor
+            [Windows.Forms.ControlStyles]::OptimizedDoubleBuffer
+        [void]$setStyleMethod.Invoke($Form, @($styles, $true))
+        [void]$updateStylesMethod.Invoke($Form, $null)
+    }
+}
+
 function Initialize-Ui {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
@@ -1200,6 +1370,7 @@ function Initialize-Ui {
     [Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
 
     $form = New-Object Windows.Forms.Form
+    Set-FormDoubleBuffering -Form $form
     $form.FormBorderStyle = [Windows.Forms.FormBorderStyle]::None
     $form.StartPosition = [Windows.Forms.FormStartPosition]::Manual
     $form.ShowInTaskbar = $false
@@ -1253,12 +1424,18 @@ function Initialize-Ui {
 }
 
 function Initialize-Tray {
-    $iconPath = Join-Path $PSScriptRoot '..\macOS\AppIcon.png'
+    $iconPath = @(
+        (Join-Path $PSScriptRoot 'AppIcon.png'),
+        (Join-Path $PSScriptRoot '..\macOS\AppIcon.png')
+    ) |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        Select-Object -First 1
     $script:TrayIconImage = New-NotifyIconImage -IconPath $iconPath
     $script:TrayIcon = New-Object Windows.Forms.NotifyIcon
     $script:TrayIcon.Icon = $script:TrayIconImage
     $script:TrayIcon.Visible = $true
-    $script:TrayIcon.Text = 'Codex 额度 · 等待数据'
+    $script:TrayIcon.Text = Get-TrayText
+    Update-TrayAnchorPoint
 
     $menu = New-Object Windows.Forms.ContextMenuStrip
     $showItem = $menu.Items.Add('显示额度')
@@ -1266,6 +1443,7 @@ function Initialize-Tray {
     [void]$menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))
     $quitItem = $menu.Items.Add('退出')
     $menu.Add_Opening({
+        Update-TrayAnchorPoint
         Hide-Popup
     })
     $showItem.Add_Click({ Show-Popup })
@@ -1273,8 +1451,10 @@ function Initialize-Tray {
     $quitItem.Add_Click({ Stop-Application })
     $script:TrayMenu = $menu
     $script:TrayIcon.ContextMenuStrip = $menu
+    $script:TrayIcon.Add_MouseMove({ Update-TrayAnchorPoint })
     $script:TrayIcon.Add_MouseClick({
         param($sender, $eventArgs)
+        Update-TrayAnchorPoint
         if ($eventArgs.Button -eq [Windows.Forms.MouseButtons]::Left) {
             Toggle-Popup
         }
@@ -1306,6 +1486,7 @@ function Stop-Application {
         try { $script:TrayIconImage.Dispose() } catch {}
         $script:TrayIconImage = $null
     }
+    $script:TrayAnchorPoint = $null
     try { [Windows.Forms.Application]::ExitThread() } catch {}
 }
 
@@ -1317,6 +1498,17 @@ function Invoke-UiSelfTest {
     try {
         Initialize-Ui
         Initialize-Tray
+        $renderBitmap = [Drawing.Bitmap]::new(
+            $script:PopupForm.ClientSize.Width,
+            $script:PopupForm.ClientSize.Height
+        )
+        $renderGraphics = [Drawing.Graphics]::FromImage($renderBitmap)
+        try {
+            Draw-Popup -Graphics $renderGraphics
+        } finally {
+            $renderGraphics.Dispose()
+            $renderBitmap.Dispose()
+        }
         Show-Popup
         if (-not $script:PopupForm.Visible) {
             throw '详情窗口无法显示'
@@ -1327,6 +1519,14 @@ function Invoke-UiSelfTest {
         }
         if ($null -eq $script:TrayIcon.ContextMenuStrip -or $script:TrayIcon.ContextMenuStrip.Items.Count -ne 4) {
             throw '系统托盘菜单未正确建立'
+        }
+        $testScreen = [pscustomobject]@{
+            Bounds = [Drawing.Rectangle]::new(0, 0, 1920, 1080)
+            WorkingArea = [Drawing.Rectangle]::new(0, 0, 1920, 1040)
+        }
+        $testLocation = Get-PopupLocation -AnchorPoint ([Drawing.Point]::new(960, 1060)) -PopupSize ([Drawing.Size]::new(386, 292)) -Screen $testScreen
+        if ($testLocation.X -ne 767 -or $testLocation.Y -ne 740) {
+            throw '详情窗口未按托盘图标居中定位'
         }
         Write-Output 'Windows UI self-test passed.'
         $script:UiSelfTestExitCode = 0
@@ -1356,6 +1556,21 @@ function Invoke-SelfTest {
     if ([Math]::Abs($snapshot.Secondary.Remaining - 24) -gt 0.001) { throw '7 天剩余比例解析失败' }
     if ((Format-Caption -Minutes 10080 -Fallback 'fallback') -ne '7 天窗口剩余') { throw '窗口标题格式化失败' }
     if ((Format-ShortError -ErrorMessage 'codex executable not found') -ne '未找到 codex') { throw '错误信息格式化失败' }
+    $ringArc = Get-QuotaRingArc -Remaining 76
+    if ($null -eq $ringArc -or [Math]::Abs(($ringArc.StartAngle + $ringArc.SweepAngle) + 90.0) -gt 0.001 -or $ringArc.SweepAngle -le 0) {
+        throw '圆环消耗方向计算失败'
+    }
+    $previousLiveSnapshot = $script:LiveSnapshot
+    $previousFallbackSnapshot = $script:FallbackSnapshot
+    $script:LiveSnapshot = $null
+    $script:FallbackSnapshot = $snapshot
+    $expectedTrayText = "Plus额度`r`n5h：76%`r`n7d：24%"
+    $actualTrayText = Get-TrayText
+    $script:LiveSnapshot = $previousLiveSnapshot
+    $script:FallbackSnapshot = $previousFallbackSnapshot
+    if ($actualTrayText -ne $expectedTrayText) {
+        throw '托盘悬浮提示格式化失败'
+    }
     Write-Output 'Windows self-test passed.'
     $script:SelfTestExitCode = 0
 }

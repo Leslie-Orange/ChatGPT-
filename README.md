@@ -35,6 +35,14 @@ Windows 版本使用系统自带的 PowerShell 5.1+ 和 WinForms，不需要安�
 .\build-windows.ps1 -Probe
 ```
 
+构建可安装的 Windows 程序：
+
+```powershell
+.\build-windows-installer.ps1
+```
+
+安装包会生成到项目根目录当天日期文件夹中的 `ChatGPT额度仪表盘.exe`，按用户级方式安装，并创建开始菜单、桌面快捷方式和卸载项。
+
 ## macOS
 
 macOS 版本仍使用原有的菜单栏项目和 Swift/AppKit 构建脚本，启动和编译方式保持不变。
