@@ -1,11 +1,43 @@
-# ChatGPT 额度仪表盘（macOS）
+# ChatGPT 额度仪表盘（macOS / Windows）
 
-这是一个独立的 macOS 菜单栏小工具，用仪表盘图标和文字直接显示 Codex 账户的两个限额窗口：
+这是一个独立的桌面小工具，用仪表盘图标和文字直接显示 Codex 账户的两个限额窗口：
 
 - 5 小时窗口剩余比例
 - 7 天窗口剩余比例
 - 两个窗口的预计重置倒计时
 - 实时读取时间与数据来源标识
+
+## Windows
+
+Windows 版本保留 macOS 版本的额度读取、快照回退、详情弹窗和刷新菜单；macOS 菜单栏项目对应替换为 Windows 系统托盘 `NotifyIcon`。左键托盘图标显示/关闭详情，右键菜单可显示额度、立即刷新或退出；托盘悬停提示显示 5 小时与 7 天剩余比例。
+
+双击 `Start-ChatGPTQuotaPet.cmd` 启动。也可以在 PowerShell 中执行：
+
+```powershell
+.\ChatGPTQuotaPet.ps1
+```
+
+Windows 版本使用系统自带的 PowerShell 5.1+ 和 WinForms，不需要安装 .NET SDK。启动前可运行核心逻辑自检：
+
+```powershell
+.\build-windows.ps1 -SelfTest
+```
+
+需要验证托盘和详情窗口初始化时，可运行：
+
+```powershell
+.\build-windows.ps1 -UiSelfTest
+```
+
+若要输出与 macOS `--probe` 相同格式的诊断结果：
+
+```powershell
+.\build-windows.ps1 -Probe
+```
+
+## macOS
+
+macOS 版本仍使用原有的菜单栏项目和 Swift/AppKit 构建脚本，启动和编译方式保持不变。
 
 ## 启动
 
