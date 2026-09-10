@@ -29,6 +29,7 @@ $uninstallKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$
 $payloadFiles = @(
     'ChatGPTQuotaPet.ps1',
     'Start-ChatGPTQuotaPet.cmd',
+    'Start-ChatGPTQuotaPet.vbs',
     'build-windows.ps1',
     'AppIcon.png',
     'ChatGPTQuotaPet.ico',
@@ -47,17 +48,21 @@ foreach ($fileName in $payloadFiles) {
     Copy-Item -LiteralPath (Join-Path $payloadRoot $fileName) -Destination (Join-Path $installRoot $fileName) -Force
 }
 
+New-Item -ItemType Directory -Path $desktop -Force | Out-Null
 New-Item -ItemType Directory -Path $startMenuFolder -Force | Out-Null
 $wsh = New-Object -ComObject WScript.Shell
 $powershellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if (-not (Test-Path -LiteralPath $powershellPath -PathType Leaf)) {
     $powershellPath = 'powershell.exe'
 }
-$commandPath = if ([string]::IsNullOrWhiteSpace($env:ComSpec)) { 'cmd.exe' } else { $env:ComSpec }
-$launchScript = Join-Path $installRoot 'Start-ChatGPTQuotaPet.cmd'
+$wscriptPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
+if (-not (Test-Path -LiteralPath $wscriptPath -PathType Leaf)) {
+    $wscriptPath = 'wscript.exe'
+}
+$launchScript = Join-Path $installRoot 'Start-ChatGPTQuotaPet.vbs'
 $uninstallScript = Join-Path $installRoot 'Uninstall-ChatGPTQuotaPet.ps1'
 $iconPath = Join-Path $installRoot 'ChatGPTQuotaPet.ico'
-$launchArguments = '/d /c ""' + $launchScript + '""'
+$launchArguments = '//nologo "' + $launchScript + '"'
 $uninstallArguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -File "' + $uninstallScript + '"'
 
 function New-AppShortcut {
@@ -84,8 +89,8 @@ $appShortcutName = $displayName + '.lnk'
 $appStartMenuShortcut = Join-Path $startMenuFolder $appShortcutName
 $appDesktopShortcut = Join-Path $desktop $appShortcutName
 $uninstallShortcut = Join-Path $startMenuFolder ($displayName + ' Uninstall.lnk')
-New-AppShortcut -Path $appStartMenuShortcut -Target $commandPath -Arguments $launchArguments -WorkingDirectory $installRoot -IconLocation ($iconPath + ',0')
-New-AppShortcut -Path $appDesktopShortcut -Target $commandPath -Arguments $launchArguments -WorkingDirectory $installRoot -IconLocation ($iconPath + ',0')
+New-AppShortcut -Path $appStartMenuShortcut -Target $wscriptPath -Arguments $launchArguments -WorkingDirectory $installRoot -IconLocation ($iconPath + ',0')
+New-AppShortcut -Path $appDesktopShortcut -Target $wscriptPath -Arguments $launchArguments -WorkingDirectory $installRoot -IconLocation ($iconPath + ',0')
 New-AppShortcut -Path $uninstallShortcut -Target $powershellPath -Arguments $uninstallArguments -WorkingDirectory $installRoot -IconLocation ($powershellPath + ',0')
 [void][Runtime.InteropServices.Marshal]::ReleaseComObject($wsh)
 
@@ -107,6 +112,6 @@ New-ItemProperty -Path $uninstallKeyPath -Name 'NoModify' -Value 1 -PropertyType
 New-ItemProperty -Path $uninstallKeyPath -Name 'NoRepair' -Value 1 -PropertyType DWord -Force | Out-Null
 
 if ($env:CHATGPT_QUOTA_PET_NO_LAUNCH -ne '1') {
-    Start-Process -FilePath $commandPath -ArgumentList $launchArguments -WorkingDirectory $installRoot -WindowStyle Hidden
+    Start-Process -FilePath $wscriptPath -ArgumentList $launchArguments -WorkingDirectory $installRoot -WindowStyle Hidden
 }
 Write-Output ($displayName + ' installed to ' + $installRoot)

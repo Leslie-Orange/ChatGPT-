@@ -11,7 +11,9 @@ $ErrorActionPreference = 'Stop'
 
 $projectRoot = $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $OutputDirectory = Join-Path $projectRoot (Get-Date -Format 'yyyy-MM-dd')
+    $OutputDirectory = Join-Path $projectRoot 'Codex_OPT\ChatGPTQuotaPet-WindowsInstaller'
+} elseif (-not [IO.Path]::IsPathRooted($OutputDirectory)) {
+    $OutputDirectory = Join-Path $projectRoot $OutputDirectory
 }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 
@@ -93,6 +95,7 @@ try {
     $payloadFiles = @(
         'ChatGPTQuotaPet.ps1',
         'Start-ChatGPTQuotaPet.cmd',
+        'Start-ChatGPTQuotaPet.vbs',
         'build-windows.ps1'
     )
     foreach ($fileName in $payloadFiles) {
@@ -107,6 +110,7 @@ try {
     $fileTokens = @(
         'ChatGPTQuotaPet.ps1',
         'Start-ChatGPTQuotaPet.cmd',
+        'Start-ChatGPTQuotaPet.vbs',
         'build-windows.ps1',
         'AppIcon.png',
         'ChatGPTQuotaPet.ico',
