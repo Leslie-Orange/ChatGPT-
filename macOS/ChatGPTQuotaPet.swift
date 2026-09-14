@@ -481,30 +481,20 @@ final class QuotaModel: ObservableObject {
     }
 }
 
-private struct LiquidGlassBackground: View {
-    var body: some View {
-        Rectangle()
-            .fill(.ultraThinMaterial)
-        .clipped()
-        // NSPopover owns the outer contour, border, and shadow. Fill its
-        // content bounds so a second rounded mask cannot expose its backing.
-    }
+private enum QuotaDesign {
+    static let width: CGFloat = 400
+    static let height: CGFloat = 344
+    static let inset: CGFloat = 24
+    static let accent = Color.accentColor
 }
 
-// Let the system provide refraction and adaptive edges without painted highlights.
-private struct QuotaGlassSurface: ViewModifier {
-    let cornerRadius: CGFloat
-
-    func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+private struct LiquidGlassBackground: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        if reduceTransparency {
+            Color(nsColor: .windowBackgroundColor)
         } else {
-            content
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-                )
+            Rectangle().fill(.regularMaterial)
         }
     }
 }
@@ -513,23 +503,46 @@ private struct GlassIconButton: View {
     let systemName: String
     let accessibilityLabel: String
     let action: () -> Void
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
-    var body: some View {
+    private var button: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.primary.opacity(0.72))
-                .frame(width: 30, height: 30)
-                .contentShape(Circle())
+                .font(.system(size: 13, weight: .medium))
+                .frame(width: 24, height: 28)
         }
-        .buttonStyle(.plain)
-        .modifier(QuotaGlassSurface(cornerRadius: 15))
         .accessibilityLabel(accessibilityLabel)
         .help(accessibilityLabel)
+    }
+
+    var body: some View {
+        if #available(macOS 26.0, *), !reduceTransparency {
+            button.buttonStyle(.glass).buttonBorderShape(.circle)
+        } else {
+            button.buttonStyle(.bordered)
+        }
+    }
+}
+
+private struct QuotaToolbar: View {
+    let refresh: () -> Void
+    let dismiss: () -> Void
+    private var controls: some View {
+        HStack(spacing: 8) {
+            GlassIconButton(systemName: "arrow.clockwise", accessibilityLabel: "刷新额度", action: refresh)
+                .keyboardShortcut("r", modifiers: .command)
+            GlassIconButton(systemName: "xmark", accessibilityLabel: "关闭详情", action: dismiss)
+        }
+    }
+    var body: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: 8) { controls }
+        } else { controls }
     }
 }
 
 private struct QuotaRing: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let label: String
     let progress: CGFloat
     let tint: Color
@@ -555,11 +568,12 @@ private struct QuotaRing: View {
                 .foregroundStyle(Color.primary.opacity(0.72))
         }
         .frame(width: 52, height: 52)
-        .animation(.easeOut(duration: 0.35), value: progress)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.35), value: progress)
+        .accessibilityHidden(true)
     }
 }
 
-private struct QuotaCard: View {
+private struct QuotaRow: View {
     let title: String
     let badge: String
     let window: QuotaWindow
@@ -571,7 +585,7 @@ private struct QuotaCard: View {
         guard let remaining = window.remaining else { return Color.gray.opacity(0.55) }
         if remaining <= 10 { return Color(red: 0.94, green: 0.29, blue: 0.30) }
         if remaining <= 30 { return Color(red: 0.96, green: 0.60, blue: 0.06) }
-        return Color(red: 0.08, green: 0.71, blue: 0.54)
+        return QuotaDesign.accent
     }
 
     private var progress: CGFloat {
@@ -606,8 +620,9 @@ private struct QuotaCard: View {
 
             VStack(alignment: .trailing, spacing: 3) {
                 Text(QuotaFormatter.percent(window.remaining))
-                    .font(.system(size: 23, weight: .bold, design: .rounded))
-                    .foregroundStyle(tint)
+                    .font(.system(size: 32, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
                 Text(consumptionRate)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .monospacedDigit()
@@ -615,9 +630,8 @@ private struct QuotaCard: View {
                     .help("按当前窗口已用额度与已过时长折算")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .modifier(QuotaGlassSurface(cornerRadius: 20))
+        .padding(.vertical, 18)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -646,97 +660,57 @@ struct QuotaView: View {
             : Color(red: 0.96, green: 0.60, blue: 0.06)
     }
 
-    private var statusBadge: String {
-        guard let currentSnapshot else { return "WAIT" }
-        return currentSnapshot.sourceName == "app-server" ? "LIVE" : "SNAPSHOT"
-    }
-
     var body: some View {
         ZStack {
             LiquidGlassBackground()
-
-            VStack(spacing: 0) {
-                HStack(spacing: 11) {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 0.25, green: 0.57, blue: 1.0),
-                                        Color(red: 0.43, green: 0.32, blue: 0.92)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                        Image(systemName: "gauge.medium")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 38, height: 38)
-                    .shadow(color: Color.black.opacity(0.08), radius: 3, y: 2)
-
-                    VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Codex")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
                         Text(planTitle)
-                            .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.primary)
+                            .font(.system(size: 22, weight: .semibold))
                     }
-
-                    Spacer(minLength: 8)
-
-                    HStack(spacing: 7) {
-                        GlassIconButton(systemName: "arrow.clockwise", accessibilityLabel: "刷新额度", action: refresh)
-                        GlassIconButton(systemName: "xmark", accessibilityLabel: "关闭详情", action: dismiss)
-                    }
+                    Spacer()
+                    QuotaToolbar(refresh: refresh, dismiss: dismiss)
                 }
-                .padding(.horizontal, 17)
-                .padding(.top, 16)
-                .padding(.bottom, 13)
+                .padding(.bottom, 20)
 
-                VStack(spacing: 10) {
-                    QuotaCard(
-                        title: "5 小时窗口剩余",
-                        badge: "5h",
-                        window: currentSnapshot?.primary ?? placeholder,
-                        fallbackWindowMinutes: 5 * 60,
-                        ratePeriodMinutes: 30,
-                        rateUnit: "30min"
-                    )
-                    QuotaCard(
-                        title: "7 天窗口剩余",
-                        badge: "7d",
-                        window: currentSnapshot?.secondary ?? placeholder,
-                        fallbackWindowMinutes: 7 * 24 * 60,
-                        ratePeriodMinutes: 24 * 60,
-                        rateUnit: "天"
-                    )
+                HStack {
+                    Text("额度窗口")
+                    Spacer()
+                    Text("剩余比例")
                 }
-                .padding(.horizontal, 14)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
 
-                HStack(spacing: 7) {
-                    Circle()
-                        .fill(statusTint)
-                        .frame(width: 7, height: 7)
-
+                QuotaRow(
+                    title: "5 小时窗口剩余", badge: "5h",
+                    window: currentSnapshot?.primary ?? placeholder,
+                    fallbackWindowMinutes: 5 * 60,
+                    ratePeriodMinutes: 30, rateUnit: "30min"
+                )
+                Divider().opacity(0.5)
+                QuotaRow(
+                    title: "7 天窗口剩余", badge: "7d",
+                    window: currentSnapshot?.secondary ?? placeholder,
+                    fallbackWindowMinutes: 7 * 24 * 60,
+                    ratePeriodMinutes: 24 * 60, rateUnit: "天"
+                )
+                Spacer(minLength: 8)
+                HStack(alignment: .top, spacing: 6) {
+                    Circle().fill(statusTint).frame(width: 6, height: 6).padding(.top, 4)
                     Text(model.footer)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 5)
-                    Text(statusBadge)
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .tracking(0.8)
-                        .foregroundStyle(statusTint)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 11)
-                .padding(.vertical, 7)
-                .modifier(QuotaGlassSurface(cornerRadius: 18))
-                .padding(.horizontal, 17)
-                .padding(.top, 12)
-                .padding(.bottom, 14)
             }
+            .padding(QuotaDesign.inset)
         }
-        .frame(width: 386, height: 292)
+        .frame(width: QuotaDesign.width, height: QuotaDesign.height)
     }
 }
 
@@ -867,6 +841,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return event
         }
         installPopoverDismissMonitors()
+        if CommandLine.arguments.contains("--show-details") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.showPopover() }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -878,7 +855,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
-        popover.contentSize = NSSize(width: 386, height: 292)
+        popover.contentSize = NSSize(width: QuotaDesign.width, height: QuotaDesign.height)
 
         let hostingController = NSHostingController(rootView: QuotaView(
             model: model,
