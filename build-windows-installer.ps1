@@ -94,8 +94,6 @@ try {
     New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
     $payloadFiles = @(
         'ChatGPTQuotaPet.ps1',
-        'Start-ChatGPTQuotaPet.cmd',
-        'Start-ChatGPTQuotaPet.vbs',
         'build-windows.ps1'
     )
     foreach ($fileName in $payloadFiles) {
@@ -106,11 +104,14 @@ try {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'windows-installer\Uninstall-ChatGPTQuotaPet.ps1') -Destination (Join-Path $payloadRoot 'Uninstall-ChatGPTQuotaPet.ps1') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'windows-installer\install.cmd') -Destination (Join-Path $payloadRoot 'install.cmd') -Force
     New-IconFile -SourcePath (Join-Path $payloadRoot 'AppIcon.png') -DestinationPath (Join-Path $payloadRoot 'ChatGPTQuotaPet.ico')
+    $compiler = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+    $automation = Join-Path $env:SystemRoot 'Microsoft.NET\assembly\GAC_MSIL\System.Management.Automation\v4.0_3.0.0.0__31bf3856ad364e35\System.Management.Automation.dll'
+    & $compiler /nologo /target:winexe /reference:System.Windows.Forms.dll ('/reference:' + $automation) ( '/win32icon:' + (Join-Path $payloadRoot 'ChatGPTQuotaPet.ico')) ('/out:' + (Join-Path $payloadRoot 'ChatGPTQuotaPet.exe')) (Join-Path $projectRoot 'windows-installer\Launcher.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Launcher compilation failed.' }
 
     $fileTokens = @(
+        'ChatGPTQuotaPet.exe',
         'ChatGPTQuotaPet.ps1',
-        'Start-ChatGPTQuotaPet.cmd',
-        'Start-ChatGPTQuotaPet.vbs',
         'build-windows.ps1',
         'AppIcon.png',
         'ChatGPTQuotaPet.ico',
@@ -143,10 +144,10 @@ DisplayLicense=
 FinishMessage=
 TargetName=$tempOutput
 FriendlyName=ChatGPT Quota Dashboard
-AppLaunched=install.cmd
+AppLaunched=ChatGPTQuotaPet.exe --install
 PostInstallCmd=<None>
-AdminQuietInstCmd=install.cmd
-UserQuietInstCmd=install.cmd
+AdminQuietInstCmd=ChatGPTQuotaPet.exe --install
+UserQuietInstCmd=ChatGPTQuotaPet.exe --install
 SourceFiles=SourceFiles
 
 [SourceFiles]

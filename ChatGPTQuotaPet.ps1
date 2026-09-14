@@ -4,7 +4,8 @@
 param(
     [switch]$Probe,
     [switch]$SelfTest,
-    [switch]$UiSelfTest
+    [switch]$UiSelfTest,
+    [switch]$OpenDashboard
 )
 
 Set-StrictMode -Version 2.0
@@ -429,14 +430,24 @@ function Get-CodexExecutable {
         return (Resolve-Path -LiteralPath $explicit).Path
     }
 
-    $commands = @(Get-Command codex,codex.exe,codex.cmd -All -ErrorAction SilentlyContinue)
-    foreach ($command in $commands) {
-        $pathProperty = $command.PSObject.Properties['Source']
-        $path = if ($null -ne $pathProperty) { $pathProperty.Value } else { $null }
-        if ([string]::IsNullOrWhiteSpace($path)) {
-            $pathProperty = $command.PSObject.Properties['Path']
+    $commandPaths = @()
+    foreach ($commandName in @('codex.exe', 'codex', 'codex.cmd')) {
+        foreach ($command in @(Get-Command $commandName -All -ErrorAction SilentlyContinue)) {
+            $pathProperty = $command.PSObject.Properties['Source']
             $path = if ($null -ne $pathProperty) { $pathProperty.Value } else { $null }
+            if ([string]::IsNullOrWhiteSpace($path)) {
+                $pathProperty = $command.PSObject.Properties['Path']
+                $path = if ($null -ne $pathProperty) { $pathProperty.Value } else { $null }
+            }
+            if (-not [string]::IsNullOrWhiteSpace($path)) {
+                $commandPaths += $path
+            }
         }
+    }
+
+    $nativeCommandPaths = @($commandPaths | Where-Object { [IO.Path]::GetExtension($_).ToLowerInvariant() -eq '.exe' })
+    $shimCommandPaths = @($commandPaths | Where-Object { [IO.Path]::GetExtension($_).ToLowerInvariant() -in @('.cmd', '.bat') })
+    foreach ($path in @($nativeCommandPaths + $shimCommandPaths | Select-Object -Unique)) {
         if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path -PathType Leaf)) {
             return (Resolve-Path -LiteralPath $path).Path
         }
@@ -1632,6 +1643,9 @@ try {
     Initialize-Ui
     Initialize-Tray
     Refresh-Data
+    if ($OpenDashboard) {
+        Show-Popup
+    }
 
     $timer = New-Object Windows.Forms.Timer
     $timer.Interval = [int]($script:RefreshSeconds * 1000)
