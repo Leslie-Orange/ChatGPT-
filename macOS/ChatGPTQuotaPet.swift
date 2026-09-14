@@ -483,40 +483,29 @@ final class QuotaModel: ObservableObject {
 
 private struct LiquidGlassBackground: View {
     var body: some View {
-        ZStack {
-            Color(nsColor: .windowBackgroundColor).opacity(0.38)
-
-            Circle()
-                .fill(Color(red: 0.42, green: 0.70, blue: 1.0).opacity(0.29))
-                .frame(width: 240, height: 240)
-                .blur(radius: 34)
-                .offset(x: -145, y: -120)
-
-            Circle()
-                .fill(Color(red: 0.65, green: 0.52, blue: 1.0).opacity(0.22))
-                .frame(width: 220, height: 220)
-                .blur(radius: 36)
-                .offset(x: 158, y: 122)
-
-            Rectangle()
-                .fill(.ultraThinMaterial)
-
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.15),
-                            Color.white.opacity(0.025),
-                            Color.blue.opacity(0.02)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        }
+        Rectangle()
+            .fill(.ultraThinMaterial)
         .clipped()
         // NSPopover owns the outer contour, border, and shadow. Fill its
         // content bounds so a second rounded mask cannot expose its backing.
+    }
+}
+
+// Let the system provide refraction and adaptive edges without painted highlights.
+private struct QuotaGlassSurface: ViewModifier {
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        } else {
+            content
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                )
+        }
     }
 }
 
@@ -534,9 +523,7 @@ private struct GlassIconButton: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .background(Circle().fill(.ultraThinMaterial))
-        .overlay(Circle().stroke(Color.white.opacity(0.42), lineWidth: 0.8))
-        .shadow(color: Color.black.opacity(0.05), radius: 5, y: 2)
+        .modifier(QuotaGlassSurface(cornerRadius: 15))
         .accessibilityLabel(accessibilityLabel)
         .help(accessibilityLabel)
     }
@@ -562,7 +549,7 @@ private struct QuotaRing: View {
                     style: StrokeStyle(lineWidth: 5, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
-                .shadow(color: tint.opacity(0.36), radius: 4)
+
             Text(label)
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundStyle(Color.primary.opacity(0.72))
@@ -630,30 +617,7 @@ private struct QuotaCard: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.10), Color.white.opacity(0.01)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.54), Color.white.opacity(0.12)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 0.8
-                )
-        )
-        .shadow(color: Color.black.opacity(0.05), radius: 12, x: 0, y: 5)
+        .modifier(QuotaGlassSurface(cornerRadius: 20))
     }
 }
 
@@ -710,7 +674,7 @@ struct QuotaView: View {
                             .foregroundStyle(.white)
                     }
                     .frame(width: 38, height: 38)
-                    .shadow(color: Color.blue.opacity(0.28), radius: 9, y: 4)
+                    .shadow(color: Color.black.opacity(0.08), radius: 3, y: 2)
 
                     VStack(alignment: .leading, spacing: 0) {
                         Text(planTitle)
@@ -753,7 +717,7 @@ struct QuotaView: View {
                     Circle()
                         .fill(statusTint)
                         .frame(width: 7, height: 7)
-                        .shadow(color: statusTint.opacity(0.55), radius: 4)
+
                     Text(model.footer)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.secondary)
@@ -766,8 +730,7 @@ struct QuotaView: View {
                 }
                 .padding(.horizontal, 11)
                 .padding(.vertical, 7)
-                .background(Capsule().fill(.ultraThinMaterial))
-                .overlay(Capsule().stroke(Color.white.opacity(0.28), lineWidth: 0.7))
+                .modifier(QuotaGlassSurface(cornerRadius: 18))
                 .padding(.horizontal, 17)
                 .padding(.top, 12)
                 .padding(.bottom, 14)
